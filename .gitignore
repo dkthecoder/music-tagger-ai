@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+*.egg
+
+# Models (large files — download separately)
+models/*.pb
+models/*.h5
+models/*.tflite
+!models/.gitkeep
+
+# Data (personal library paths)
+data/
+embeddings/
+*.npy
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log

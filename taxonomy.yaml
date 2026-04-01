@@ -1,0 +1,118 @@
+# Music Tagger AI — Genre Taxonomy
+# Machine-readable version of the tagging system
+
+base_genres:
+  - Hip-Hop/Rap
+  - R&B/Soul
+  - Pop
+  - Electronic
+  - House
+  - Dance
+  - Dancehall
+  - Reggae
+  - Soul
+  - Bollywood
+  - Amapiano
+  - Metal
+  - Rock
+  - Hard Rock
+  - Funk
+  - Disco
+  - Electro
+  - Techno
+  - Nu Disco
+  - Nu Metal
+  - Bhangra
+  - Indian Pop
+  - Alternative
+
+subgenres:
+  standard:
+    - Drill
+    - Trap
+    - Grime
+    - G-House
+    - Boom-Bap
+    - Afro House
+    - Afrobeats
+    - Phonk
+    - Brazilian Phonk
+    - Electro House
+    - Lo-Fi
+    - Garage
+    - Trance
+    - Rapcore
+    - PluggnB
+
+  custom_transfer_learning:
+    - Afro Trap
+    - Arab Trap
+    - Dark Rap
+    - Neo Soul
+
+regional:
+  - US
+  - UK
+  - Deutsch
+  - Svenska
+  - Swiss
+  - Norsk
+  - Turkish
+  - Romanian
+  - Russian
+  - Punjabi
+  - Spanish
+  - ZA
+  - Canada
+  - Latin
+  - Brazilian
+  - East Coast
+  - West Coast
+  - Southern
+  - Bay Area
+
+scene:
+  - Urban Asian
+
+style:
+  - Old School
+  - Remix
+  - Old School Remix
+  - Soundtrack
+
+mood:
+  # Future: AI-detected from audio
+  - Energetic
+  - Dark
+  - Melodic
+  - Aggressive
+  - Chill
+  - Party
+  - Cinematic
+  - Nostalgic
+
+# Compound genres — these are SINGLE genre names, not two genres
+compound_genres:
+  - Hip-Hop/Rap
+  - R&B/Soul
+
+# Retired tags — do not use
+retired:
+  Hip-Hop: Hip-Hop/Rap
+  Rap: Hip-Hop/Rap
+  R&B: R&B/Soul
+  Hip-Hop/Asian: Urban Asian
+  Hip-Hop/Drill: [Hip-Hop/Rap, Drill]
+  Hip-Hop/R&B: [Hip-Hop/Rap, R&B/Soul]
+  Hip-Hop/Pop: [Hip-Hop/Rap, Pop]
+  Techno/House: [Techno, House]
+  Pop/R&B: [Pop, R&B/Soul]
+  Rap Core: Rapcore
+  Desi: Urban Asian
+  World: null
+  Worldwide: null
+  International Pop: Pop
+  Punjabi Pop: [Punjabi, Pop]
+  Indipop: Indian Pop
+  Svensk: Svenska
+  Dance Hall: Dancehall
