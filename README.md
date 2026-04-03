@@ -15,7 +15,7 @@ No existing tool can tell the difference between these. This one can — because
 
 ## How It Works
 
-1. **Pre-trained analysis** — Essentia's Discogs model classifies 400+ standard genres and detects mood/energy
+1. **Pre-trained analysis** — Essentia's Discogs model classifies 400+ standard genres with BPM detection
 2. **Custom classification** — Transfer learning on your tagged library teaches the model YOUR subgenres
 3. **Tag suggestions** — Analyses untagged music and suggests tags with confidence scores
 4. **You decide** — Review suggestions before they're written to files
@@ -30,7 +30,6 @@ Train classifier on YOUR custom tags
 Run on new/untagged music
          ↓
 "This sounds like Afro Trap (87% confidence)"
-"Mood: Energetic (91%), Dark (12%)"
          ↓
 Review → Approve → Tags written to files
 ```
@@ -38,9 +37,8 @@ Review → Approve → Tags written to files
 ## Features
 
 - Audio-based analysis (not metadata lookups)
-- Pre-trained Discogs 400 genre classification
-- Mood detection (energetic, dark, happy, aggressive, relaxed)
-- BPM and key detection
+- Pre-trained Discogs 400 genre/style classification
+- BPM detection
 - Custom subgenre classification via transfer learning
 - Batch processing for entire libraries
 - Dry-run mode (preview before writing)
@@ -57,7 +55,7 @@ The project uses a layered tagging system where songs get multiple tags across d
 | **Regional** | Artist origin/scene | `US`, `UK`, `Deutsch`, `Svenska`, `ZA` |
 | **Scene** | Cultural music scenes | `Urban Asian` |
 | **Style** | Era/format markers | `Old School`, `Remix` |
-| **Mood** | Energy/vibe (AI-detected) | `Energetic`, `Dark`, `Melodic`, `Aggressive` |
+| **Mood** | Energy/vibe (planned) | `Energetic`, `Dark`, `Melodic`, `Aggressive` |
 
 See [docs/taxonomy.md](docs/taxonomy.md) for the full genre system.
 
@@ -68,12 +66,15 @@ See [docs/taxonomy.md](docs/taxonomy.md) for the full genre system.
 git clone https://github.com/YOUR_USERNAME/music-tagger-ai.git
 cd music-tagger-ai
 
-# Create virtual environment
-python3 -m venv venv
+# Create virtual environment (requires Python 3.12+)
+python3.12 -m venv venv
 source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Download the pre-trained model (~18MB)
+python scripts/download_model.py
 ```
 
 ## Quick Start
@@ -88,12 +89,22 @@ python scripts/extract_embeddings.py /path/to/tagged/library
 # 3. Train custom classifier on your tags
 python scripts/train_classifier.py
 
-# 4. Predict tags for untagged music
+# 4. Predict tags for untagged music (dry-run preview)
 python scripts/predict_tags.py /path/to/untagged/music
 
 # 5. Write approved tags to files
-python scripts/write_tags.py --apply
+python scripts/predict_tags.py /path/to/untagged/music --apply
 ```
+
+## Scripts
+
+| Script | What it does |
+|--------|-------------|
+| `scripts/analyse.py` | Analyse tracks with the pre-trained Discogs model — top genre/style predictions + BPM. Table or JSON output |
+| `scripts/extract_embeddings.py` | Scan a tagged library, extract 1280-dim audio embeddings, pair with existing genre tags. Saves `.npy` + `.json` |
+| `scripts/train_classifier.py` | Train a multi-label classifier (OneVsRest SGD) on extracted embeddings. Per-tag F1 scores, cross-validation, saves `.pkl` |
+| `scripts/predict_tags.py` | Run the trained classifier on new/untagged music. Shows suggestions with confidence scores. Dry-run by default, `--apply` to write tags to files |
+| `scripts/download_model.py` | Download the pre-trained Discogs-EffNet model from Essentia's repository (~18MB) |
 
 ## The Cultural Story
 
@@ -109,7 +120,7 @@ Read the full story in the [LinkedIn article series](#articles).
 ## Articles
 
 1. [My Music Library Was a Mess — So I Built a System](#)
-2. [Beyond Hip-Hop/Rap: Mapping Europe's Multicultural Music Scene](#)
+2. [Beyond "Hip-Hop/Rap" — Mapping Europe's Multicultural Music Scene](#)
 3. [Teaching AI to Hear What Spotify Can't](#)
 4. [From 400 Discogs Genres to My Own: Transfer Learning for Music](#)
 5. [Open-Sourcing the Music Tagger: What I Learned](#)
@@ -117,11 +128,12 @@ Read the full story in the [LinkedIn article series](#articles).
 ## Tech Stack
 
 - [Essentia](https://essentia.upf.edu/) — Audio analysis and pre-trained ML models
-- [TensorFlow](https://www.tensorflow.org/) — Transfer learning
-- [scikit-learn](https://scikit-learn.org/) — Custom classifier training
-- [mutagen](https://mutagen.readthedocs.io/) — Audio metadata reading/writing
-- [librosa](https://librosa.org/) — Audio feature extraction and BPM detection
-- Python 3.10+
+- [scikit-learn](https://scikit-learn.org/) — Custom classifier training (OneVsRest SGD)
+- [TensorFlow](https://www.tensorflow.org/) — Backend for Essentia's deep learning models
+- [mutagen](https://mutagen.readthedocs.io/) — Audio metadata reading/writing (FLAC Vorbis + MP3 ID3)
+- [librosa](https://librosa.org/) — Audio feature extraction
+- [Rich](https://rich.readthedocs.io/) — Terminal output formatting
+- Python 3.12+
 
 ## License
 

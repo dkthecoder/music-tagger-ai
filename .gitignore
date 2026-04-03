@@ -17,6 +17,7 @@ models/*.tflite
 
 # Data (personal library paths)
 data/
+!data/.gitkeep
 embeddings/
 *.npy
 
@@ -29,6 +30,9 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Trained models (personal)
+models/*.pkl
 
 # Logs
 *.log
