@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import yaml
 from rich.console import Console
 from rich.table import Table
 from rich.prompt import Confirm
@@ -33,8 +34,63 @@ console = Console()
 MODEL_DIR = Path(__file__).parent.parent / "models"
 EFFNET_PATH = MODEL_DIR / "discogs-effnet-bs64-1.pb"
 CLASSIFIER_PATH = MODEL_DIR / "custom_classifier.pkl"
+TAXONOMY_PATH = Path(__file__).parent.parent / "taxonomy.yaml"
 
 AUDIO_EXTENSIONS = {".flac", ".mp3"}
+
+
+def load_taxonomy():
+    """Load taxonomy for tag validation and retired tag mapping."""
+    with open(TAXONOMY_PATH) as f:
+        taxonomy = yaml.safe_load(f)
+
+    # Build set of all valid tags
+    valid_tags = set()
+    valid_tags.update(taxonomy.get("base_genres", []))
+    for sg_list in taxonomy.get("subgenres", {}).values():
+        if isinstance(sg_list, list):
+            valid_tags.update(sg_list)
+    valid_tags.update(taxonomy.get("regional", []))
+    valid_tags.update(taxonomy.get("scene", []))
+    valid_tags.update(taxonomy.get("style", []))
+    valid_tags.update(taxonomy.get("mood", []))
+
+    # Build retired tag mapping
+    retired = {}
+    for old, new in taxonomy.get("retired", {}).items():
+        if new is None:
+            continue  # tag retired with no replacement
+        if isinstance(new, list):
+            retired[old] = new  # maps to multiple tags
+        else:
+            retired[old] = [new]  # maps to single tag
+
+    return valid_tags, retired
+
+
+def normalise_tags(tags: list[str], valid_tags: set, retired: dict) -> list[str]:
+    """Validate and normalise tags against the taxonomy.
+
+    - Maps retired tags to their replacements
+    - Warns about unknown tags
+    - Deduplicates while preserving order
+    """
+    result = []
+    for tag in tags:
+        if tag in retired:
+            replacements = retired[tag]
+            for r in replacements:
+                if r not in result:
+                    result.append(r)
+        elif tag in valid_tags:
+            if tag not in result:
+                result.append(tag)
+        else:
+            # Unknown tag — still include but warn
+            console.print(f"[yellow]  Warning: '{tag}' not in taxonomy[/yellow]")
+            if tag not in result:
+                result.append(tag)
+    return result
 
 
 def load_classifier():
@@ -83,9 +139,21 @@ def extract_embedding(filepath: Path) -> np.ndarray | None:
         return None
 
 
-def write_tags(filepath: Path, new_tags: list[str], merge: bool = True):
-    """Write genre tags to a music file."""
+def write_tags(filepath: Path, new_tags: list[str], merge: bool = True,
+               valid_tags: set = None, retired: dict = None):
+    """Write genre tags to a music file.
+
+    Handles:
+    - Retired tag mapping (e.g. 'Hip-Hop' → 'Hip-Hop/Rap')
+    - Deduplication
+    - Mixed-case GENRE key normalisation (lowercase 'genre' → uppercase 'GENRE')
+    - Proper multi-value FLAC Vorbis entries
+    """
     suffix = filepath.suffix.lower()
+
+    # Normalise new tags against taxonomy
+    if valid_tags and retired:
+        new_tags = normalise_tags(new_tags, valid_tags, retired)
 
     if suffix == ".flac":
         audio = FLAC(str(filepath))
@@ -93,16 +161,20 @@ def write_tags(filepath: Path, new_tags: list[str], merge: bool = True):
             audio.add_tags()
 
         if merge:
+            # Read existing, matching both 'genre' and 'GENRE'
             existing = [v for k, v in audio.tags if k.upper() == "GENRE"]
+            # Normalise existing tags too (fix any retired tags already on file)
+            if valid_tags and retired:
+                existing = normalise_tags(existing, valid_tags, retired)
             all_tags = list(dict.fromkeys(existing + new_tags))  # dedupe, preserve order
         else:
             all_tags = new_tags
 
-        # Remove existing GENRE entries
+        # Remove ALL genre entries (both 'genre' and 'GENRE' — normalise to uppercase)
         audio.tags._data = [
             (k, v) for k, v in audio.tags._data if k.upper() != "GENRE"
         ]
-        # Write new ones
+        # Write as uppercase GENRE entries
         for tag in all_tags:
             audio.tags.append(("GENRE", tag))
         audio.save()
@@ -111,6 +183,8 @@ def write_tags(filepath: Path, new_tags: list[str], merge: bool = True):
         audio = EasyID3(str(filepath))
         if merge:
             existing = list(audio.get("genre", []))
+            if valid_tags and retired:
+                existing = normalise_tags(existing, valid_tags, retired)
             all_tags = list(dict.fromkeys(existing + new_tags))
         else:
             all_tags = new_tags
@@ -165,6 +239,9 @@ def main():
     if not EFFNET_PATH.exists():
         console.print(f"[red]Essentia model not found at {EFFNET_PATH}[/red]")
         sys.exit(1)
+
+    # Load taxonomy for tag validation
+    valid_tags, retired = load_taxonomy()
 
     # Load classifier
     model_data = load_classifier()
@@ -303,7 +380,8 @@ def main():
         for result in tracks_with_suggestions:
             filepath = Path(result["file"])
             try:
-                write_tags(filepath, result["new_tags"], merge=not args.replace)
+                write_tags(filepath, result["new_tags"], merge=not args.replace,
+                           valid_tags=valid_tags, retired=retired)
                 written += 1
                 console.print(
                     f"  [green]✓[/green] {result['filename']}: "
