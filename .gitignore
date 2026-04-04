@@ -9,11 +9,8 @@ venv/
 .venv/
 *.egg
 
-# Models (large files — download separately)
-models/*.pb
-models/*.h5
-models/*.tflite
-!models/.gitkeep
+# Trained models (personal to your library)
+models/*.pkl
 
 # Data (personal library paths)
 data/
@@ -30,9 +27,6 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
-
-# Trained models (personal)
-models/*.pkl
 
 # Logs
 *.log

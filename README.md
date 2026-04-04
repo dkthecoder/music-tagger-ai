@@ -72,9 +72,6 @@ source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Download the pre-trained model (~18MB)
-python scripts/download_model.py
 ```
 
 ## Quick Start
@@ -104,7 +101,6 @@ python scripts/predict_tags.py /path/to/untagged/music --apply
 | `scripts/extract_embeddings.py` | Scan a tagged library, extract 1280-dim audio embeddings, pair with existing genre tags. Saves `.npy` + `.json` |
 | `scripts/train_classifier.py` | Train a multi-label classifier (OneVsRest SGD) on extracted embeddings. Per-tag F1 scores, cross-validation, saves `.pkl` |
 | `scripts/predict_tags.py` | Run the trained classifier on new/untagged music. Shows suggestions with confidence scores. Dry-run by default, `--apply` to write tags to files |
-| `scripts/download_model.py` | Download the pre-trained Discogs-EffNet model from Essentia's repository (~18MB) |
 
 ## The Cultural Story
 
