@@ -102,6 +102,19 @@ python scripts/predict_tags.py /path/to/untagged/music --apply
 | `scripts/train_classifier.py` | Train a multi-label classifier (OneVsRest SGD) on extracted embeddings. Per-tag F1 scores, cross-validation, saves `.pkl` |
 | `scripts/predict_tags.py` | Run the trained classifier on new/untagged music. Shows suggestions with confidence scores. Dry-run by default, `--apply` to write tags to files |
 
+## Tag Writing
+
+When writing tags to files (`predict_tags.py --apply`), the script enforces the taxonomy conventions from `taxonomy.yaml`:
+
+- **Retired tag mapping** — automatically corrects legacy tags (e.g. `Hip-Hop` → `Hip-Hop/Rap`, `R&B` → `R&B/Soul`, `Desi` → `Urban Asian`)
+- **False compound splitting** — `Hip-Hop/Drill` becomes two separate tags: `Hip-Hop/Rap` + `Drill`
+- **Deduplication** — never writes the same tag twice, preserves order
+- **Mixed-case normalisation** — strips both `genre` and `GENRE` Vorbis keys, rewrites as uppercase `GENRE`
+- **Existing tag cleanup** — when merging with existing tags on a file, retired tags already on the file are also corrected
+- **Unknown tag warning** — tags not in the taxonomy are still written but flagged with a warning
+- **FLAC** — writes proper multi-value Vorbis entries (one `GENRE=` per tag, not delimited strings)
+- **MP3** — writes to ID3v2 TCON frame
+
 ## The Cultural Story
 
 This project was born from trying to organise a 7000+ track music library spanning:
