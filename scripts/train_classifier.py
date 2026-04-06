@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 from rich.console import Console
 from rich.table import Table
-from sklearn.linear_model import SGDClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.model_selection import cross_val_score, StratifiedKFold
 from sklearn.preprocessing import MultiLabelBinarizer, StandardScaler
@@ -156,17 +156,20 @@ def main():
     console.print(f"Train: {len(X_train)}, Test: {len(X_test)}")
 
     # Build classifier pipeline
-    console.print("\nTraining classifier...")
+    console.print("\nTraining MLP classifier...")
     classifier = Pipeline([
         ("scaler", StandardScaler()),
         (
             "clf",
             OneVsRestClassifier(
-                SGDClassifier(
-                    loss="modified_huber",  # gives probability estimates
-                    max_iter=1000,
+                MLPClassifier(
+                    hidden_layer_sizes=(256, 128),
+                    activation="relu",
+                    max_iter=500,
                     random_state=42,
-                    class_weight="balanced",
+                    early_stopping=True,
+                    validation_fraction=0.1,
+                    learning_rate="adaptive",
                 ),
                 n_jobs=-1,
             ),
@@ -210,9 +213,11 @@ def main():
         if y[:, i].sum() >= 10:  # Only CV if enough samples
             pipe = Pipeline([
                 ("scaler", StandardScaler()),
-                ("clf", SGDClassifier(
-                    loss="modified_huber", max_iter=1000,
-                    random_state=42, class_weight="balanced",
+                ("clf", MLPClassifier(
+                    hidden_layer_sizes=(256, 128),
+                    activation="relu", max_iter=500,
+                    random_state=42, early_stopping=True,
+                    validation_fraction=0.1, learning_rate="adaptive",
                 )),
             ])
             try:

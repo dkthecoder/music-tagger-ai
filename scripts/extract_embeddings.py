@@ -18,15 +18,11 @@ from pathlib import Path
 
 import numpy as np
 import yaml
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 
 from essentia.standard import MonoLoader, TensorflowPredictEffnetDiscogs
 import mutagen
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3
-
-console = Console()
 
 MODEL_DIR = Path(__file__).parent.parent / "models"
 MODEL_PATH = MODEL_DIR / "discogs-effnet-bs64-1.pb"
@@ -86,7 +82,7 @@ def extract_embedding(filepath: Path) -> np.ndarray | None:
         # Average across all frames to get a single vector
         return np.mean(embeddings, axis=0)
     except Exception as e:
-        console.print(f"[red]  Error extracting {filepath.name}: {e}[/red]")
+        print(f"  ERROR: {filepath.name}: {e}", file=sys.stderr, flush=True)
         return None
 
 
@@ -96,6 +92,37 @@ def find_tagged_files(path: Path) -> list[Path]:
     for ext in AUDIO_EXTENSIONS:
         files.extend(path.rglob(f"*{ext}"))
     return sorted(files)
+
+
+def _save_checkpoint(embeddings, labels, filepaths, all_tags, output_dir):
+    """Save incremental checkpoint (won't overwrite final files)."""
+    embeddings_array = np.array(embeddings)
+    np.save(output_dir / "embeddings_checkpoint.npy", embeddings_array)
+    metadata = {
+        "filepaths": filepaths,
+        "labels": labels,
+        "embedding_dim": int(embeddings_array.shape[1]) if len(embeddings) > 0 else 0,
+        "num_tracks": len(embeddings),
+        "unique_tags": sorted(all_tags),
+    }
+    with open(output_dir / "metadata_checkpoint.json", "w") as f:
+        json.dump(metadata, f, indent=2)
+    print(f"  Checkpoint saved: {len(embeddings)} tracks", flush=True)
+
+
+def _save_final(embeddings, labels, filepaths, all_tags, output_dir):
+    """Save final output files."""
+    embeddings_array = np.array(embeddings)
+    np.save(output_dir / "embeddings.npy", embeddings_array)
+    metadata = {
+        "filepaths": filepaths,
+        "labels": labels,
+        "embedding_dim": int(embeddings_array.shape[1]) if len(embeddings) > 0 else 0,
+        "num_tracks": len(embeddings),
+        "unique_tags": sorted(all_tags),
+    }
+    with open(output_dir / "metadata.json", "w") as f:
+        json.dump(metadata, f, indent=2)
 
 
 def main():
@@ -124,11 +151,11 @@ def main():
     args = parser.parse_args()
 
     if not MODEL_PATH.exists():
-        console.print(f"[red]Model not found at {MODEL_PATH}[/red]")
+        print(f"Error: Model not found at {MODEL_PATH}", file=sys.stderr)
         sys.exit(1)
 
     if not args.path.exists():
-        console.print(f"[red]Path not found: {args.path}[/red]")
+        print(f"Error: Path not found: {args.path}", file=sys.stderr)
         sys.exit(1)
 
     taxonomy = load_taxonomy()
@@ -146,7 +173,7 @@ def main():
 
     # Find files
     all_files = find_tagged_files(args.path)
-    console.print(f"Found {len(all_files)} audio files")
+    print(f"Found {len(all_files)} audio files", flush=True)
 
     # Filter to files with tags
     tagged_files = []
@@ -157,72 +184,80 @@ def main():
             tagged_files.append(f)
             file_tags[str(f)] = tags
 
-    console.print(f"  {len(tagged_files)} have genre tags")
+    print(f"  {len(tagged_files)} have genre tags", flush=True)
 
     if args.limit > 0:
         tagged_files = tagged_files[: args.limit]
-        console.print(f"  Limited to {len(tagged_files)} files")
+        print(f"  Limited to {len(tagged_files)} files", flush=True)
 
     if not tagged_files:
-        console.print("[red]No tagged files found.[/red]")
+        print("No tagged files found.", flush=True)
         sys.exit(1)
 
     # Collect unique tags
     all_tags = set()
     for tags in file_tags.values():
         all_tags.update(tags)
-    console.print(f"  {len(all_tags)} unique genre tags found")
-    console.print()
+    print(f"  {len(all_tags)} unique genre tags found\n", flush=True)
 
-    # Extract embeddings
+    # Extract embeddings with incremental saves
     embeddings = []
     labels = []
     filepaths = []
     skipped = 0
+    save_every = 100  # save checkpoint every N tracks
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TimeRemainingColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Extracting embeddings", total=len(tagged_files))
-
-        for filepath in tagged_files:
-            progress.update(task, description=f"[cyan]{filepath.name[:40]}[/cyan]")
-            embedding = extract_embedding(filepath)
-            if embedding is not None:
-                embeddings.append(embedding)
-                labels.append(file_tags[str(filepath)])
-                filepaths.append(str(filepath))
-            else:
-                skipped += 1
-            progress.advance(task)
-
-    console.print()
-    console.print(f"Extracted {len(embeddings)} embeddings ({skipped} skipped)")
-
-    # Save
     args.output.mkdir(parents=True, exist_ok=True)
+    total = len(tagged_files)
 
-    embeddings_array = np.array(embeddings)
-    np.save(args.output / "embeddings.npy", embeddings_array)
+    # Resume from existing checkpoint if available
+    checkpoint_path = args.output / "embeddings_checkpoint.npy"
+    checkpoint_meta = args.output / "metadata_checkpoint.json"
+    start_idx = 0
 
-    metadata = {
-        "filepaths": filepaths,
-        "labels": labels,
-        "embedding_dim": int(embeddings_array.shape[1]) if len(embeddings) > 0 else 0,
-        "num_tracks": len(embeddings),
-        "unique_tags": sorted(all_tags),
-    }
-    with open(args.output / "metadata.json", "w") as f:
-        json.dump(metadata, f, indent=2)
+    if checkpoint_path.exists() and checkpoint_meta.exists():
+        existing_emb = np.load(checkpoint_path)
+        with open(checkpoint_meta) as f:
+            existing_meta = json.load(f)
+        embeddings = list(existing_emb)
+        labels = existing_meta["labels"]
+        filepaths = existing_meta["filepaths"]
+        start_idx = len(filepaths)
+        print(f"Resuming from checkpoint: {start_idx}/{total} tracks already done", flush=True)
 
-    console.print(f"[green]Saved to {args.output}/[/green]")
-    console.print(f"  embeddings.npy: {embeddings_array.shape}")
-    console.print(f"  metadata.json: {len(filepaths)} tracks, {len(all_tags)} tags")
+    for i, filepath in enumerate(tagged_files[start_idx:], start=start_idx + 1):
+        # Log to stdout so background tasks can see progress
+        if i % 50 == 0 or i == start_idx + 1:
+            pct = i * 100 // total
+            print(f"[{i}/{total}] ({pct}%) {filepath.name}", flush=True)
+
+        embedding = extract_embedding(filepath)
+        if embedding is not None:
+            embeddings.append(embedding)
+            labels.append(file_tags[str(filepath)])
+            filepaths.append(str(filepath))
+        else:
+            skipped += 1
+            print(f"  SKIPPED: {filepath.name}", flush=True)
+
+        # Incremental save every N tracks
+        if i % save_every == 0:
+            _save_checkpoint(embeddings, labels, filepaths, all_tags, args.output)
+
+    print(f"\nExtracted {len(embeddings)} embeddings ({skipped} skipped)", flush=True)
+
+    # Final save (overwrites checkpoint with final files)
+    _save_final(embeddings, labels, filepaths, all_tags, args.output)
+
+    # Clean up checkpoint files
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
+    if checkpoint_meta.exists():
+        checkpoint_meta.unlink()
+
+    print(f"Saved to {args.output}/", flush=True)
+    print(f"  embeddings.npy: ({len(embeddings)}, 1280)", flush=True)
+    print(f"  metadata.json: {len(filepaths)} tracks, {len(all_tags)} tags", flush=True)
 
     # Print tag distribution
     tag_counts = {}
@@ -230,10 +265,10 @@ def main():
         for tag in tags:
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
 
-    console.print("\nTag distribution (top 20):")
+    print("\nTag distribution (top 20):", flush=True)
     for tag, count in sorted(tag_counts.items(), key=lambda x: -x[1])[:20]:
         bar = "█" * min(count // 5, 40)
-        console.print(f"  {tag:25s} {count:4d} {bar}")
+        print(f"  {tag:25s} {count:4d} {bar}", flush=True)
 
 
 if __name__ == "__main__":

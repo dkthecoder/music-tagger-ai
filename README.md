@@ -21,7 +21,7 @@ No existing tool can tell the difference between these. This one can — because
 4. **You decide** — Review suggestions before they're written to files
 
 ```
-Your tagged library (7000+ files)
+Your tagged library (7,478 files)
          ↓
 Essentia extracts audio embeddings
          ↓
@@ -117,7 +117,7 @@ When writing tags to files (`predict_tags.py --apply`), the script enforces the 
 
 ## The Cultural Story
 
-This project was born from trying to organise a 7000+ track music library spanning:
+This project was born from trying to organise a 7,478 track music library spanning:
 
 - **European multicultural rap** — German, Swedish, Norwegian rappers with African, Arab, Turkish, Balkan heritage creating genres that don't exist in standard classification systems
 - **South Asian diaspora music** — UK-born "Urban Asian" scene blending hip-hop, R&B, garage, and bhangra
