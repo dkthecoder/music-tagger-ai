@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import yaml
 from rich.console import Console
 from rich.table import Table
 from sklearn.neural_network import MLPClassifier
@@ -33,6 +34,39 @@ console = Console()
 
 DEFAULT_DATA_DIR = Path(__file__).parent.parent / "data"
 DEFAULT_MODEL_DIR = Path(__file__).parent.parent / "models"
+TAXONOMY_PATH = Path(__file__).parent.parent / "taxonomy.yaml"
+
+
+def load_retired_tags():
+    """Load retired tag mapping from taxonomy."""
+    with open(TAXONOMY_PATH) as f:
+        taxonomy = yaml.safe_load(f)
+    retired = {}
+    for old, new in taxonomy.get("retired", {}).items():
+        if new is None:
+            continue
+        if isinstance(new, list):
+            retired[old] = new
+        else:
+            retired[old] = [new]
+    return retired
+
+
+def normalise_labels(labels: list[list[str]], retired: dict) -> list[list[str]]:
+    """Clean up training labels — map retired tags, deduplicate."""
+    cleaned = []
+    for tag_list in labels:
+        result = []
+        for tag in tag_list:
+            if tag in retired:
+                for r in retired[tag]:
+                    if r not in result:
+                        result.append(r)
+            else:
+                if tag not in result:
+                    result.append(tag)
+        cleaned.append(result)
+    return cleaned
 
 
 def load_data(data_dir: Path):
@@ -93,6 +127,11 @@ def main():
 
     console.print(f"  {embeddings.shape[0]} tracks, {embeddings.shape[1]}-dim embeddings")
     console.print(f"  {len(metadata['unique_tags'])} unique tags in dataset")
+
+    # Normalise labels — map retired tags, deduplicate
+    retired = load_retired_tags()
+    labels = normalise_labels(labels, retired)
+    console.print(f"  Labels normalised (retired tags mapped)")
 
     # Filter tags by minimum samples
     tag_counts = {}

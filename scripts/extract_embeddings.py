@@ -28,7 +28,7 @@ MODEL_DIR = Path(__file__).parent.parent / "models"
 MODEL_PATH = MODEL_DIR / "discogs-effnet-bs64-1.pb"
 TAXONOMY_PATH = Path(__file__).parent.parent / "taxonomy.yaml"
 
-AUDIO_EXTENSIONS = {".flac", ".mp3"}
+AUDIO_EXTENSIONS = {".flac"}
 
 
 def load_taxonomy():
