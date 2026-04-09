@@ -2,12 +2,13 @@
 """Predict custom genre tags for untagged or new music.
 
 Uses the trained classifier from train_classifier.py to suggest tags
-with confidence scores. Supports dry-run preview and writing tags.
+with confidence scores. Two-tier system: confident tags auto-apply,
+borderline tags are shown for review.
 
 Usage:
-    python scripts/predict_tags.py /path/to/music
-    python scripts/predict_tags.py /path/to/music --threshold 0.6
     python scripts/predict_tags.py /path/to/music --apply
+    python scripts/predict_tags.py /path/to/music --apply --auto-only
+    python scripts/predict_tags.py /path/to/music --threshold 0.15 --apply
     python scripts/predict_tags.py /path/to/track.flac --verbose
 """
 
@@ -205,13 +206,35 @@ def find_audio_files(path: Path) -> list[Path]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Predict custom genre tags")
+    parser = argparse.ArgumentParser(
+        description="Predict custom genre tags",
+        epilog="Two-tier mode (default): tags above --auto are written automatically, "
+               "tags between --review and --auto are prompted for confirmation. "
+               "Use --threshold to bypass two-tier mode with a single hard cutoff.",
+    )
     parser.add_argument("path", type=Path, help="File or folder to predict tags for")
     parser.add_argument(
         "--threshold",
         type=float,
+        default=None,
+        help="Hard cutoff — bypass two-tier mode, treat everything above this as NEW",
+    )
+    parser.add_argument(
+        "--auto",
+        type=float,
         default=0.5,
-        help="Minimum confidence to suggest a tag (default: 0.5)",
+        help="Auto-apply threshold — tags above this are written without prompting (default: 0.5)",
+    )
+    parser.add_argument(
+        "--review",
+        type=float,
+        default=0.15,
+        help="Review threshold — tags between this and --auto are prompted (default: 0.15)",
+    )
+    parser.add_argument(
+        "--auto-only",
+        action="store_true",
+        help="Skip the review tier — only apply confident tags above --auto",
     )
     parser.add_argument(
         "--apply",
@@ -235,6 +258,17 @@ def main():
         help="Save predictions to JSON file",
     )
     args = parser.parse_args()
+
+    # Determine mode
+    if args.threshold is not None:
+        # Single threshold bypass mode
+        auto_threshold = args.threshold
+        review_threshold = args.threshold  # same — no review tier
+        two_tier = False
+    else:
+        auto_threshold = args.auto
+        review_threshold = args.review
+        two_tier = not args.auto_only
 
     if not EFFNET_PATH.exists():
         console.print(f"[red]Essentia model not found at {EFFNET_PATH}[/red]")
@@ -300,19 +334,24 @@ def main():
 
             predictions.sort(key=lambda x: -x["confidence"])
 
-            suggested = [p for p in predictions if p["confidence"] >= args.threshold]
-            suggested_tags = [p["tag"] for p in suggested]
+            # Two-tier: split into confident and review
+            confident = [p for p in predictions if p["confidence"] >= auto_threshold]
+            review = [p for p in predictions
+                      if review_threshold <= p["confidence"] < auto_threshold] if two_tier else []
 
-            # New tags = suggested minus already existing
-            new_tags = [t for t in suggested_tags if t not in existing]
+            confident_tags = [p["tag"] for p in confident if p["tag"] not in existing]
+            review_tags = [p["tag"] for p in review if p["tag"] not in existing]
 
             result = {
                 "file": str(filepath),
                 "filename": filepath.name,
                 "existing_tags": existing,
                 "predictions": predictions,
-                "suggested": suggested,
-                "new_tags": new_tags,
+                "confident": confident,
+                "review": review,
+                "confident_tags": confident_tags,
+                "review_tags": review_tags,
+                "new_tags": confident_tags,  # start with confident only
             }
             results.append(result)
             progress.advance(task)
@@ -321,12 +360,19 @@ def main():
     console.print()
 
     for result in results:
+        # Skip tracks with nothing to show (unless verbose)
+        if not args.verbose and not result["confident_tags"] and not result["review_tags"]:
+            continue
+
         table = Table(title=result["filename"], show_header=True)
         table.add_column("Tag", style="cyan")
         table.add_column("Confidence", justify="right")
         table.add_column("Status", style="dim")
 
-        display = result["predictions"] if args.verbose else result["suggested"]
+        if args.verbose:
+            display = result["predictions"]
+        else:
+            display = result["confident"] + result["review"]
 
         for pred in display:
             tag = pred["tag"]
@@ -335,9 +381,12 @@ def main():
             if tag in result["existing_tags"]:
                 status = "already tagged"
                 style = "dim"
-            elif pred["confidence"] >= args.threshold:
-                status = "NEW"
+            elif pred["confidence"] >= auto_threshold:
+                status = "AUTO"
                 style = "green bold"
+            elif two_tier and pred["confidence"] >= review_threshold:
+                status = "REVIEW"
+                style = "yellow"
             else:
                 status = ""
                 style = "dim"
@@ -355,13 +404,18 @@ def main():
         console.print()
 
     # Summary
-    tracks_with_suggestions = [r for r in results if r["new_tags"]]
-    total_new = sum(len(r["new_tags"]) for r in results)
+    total_confident = sum(len(r["confident_tags"]) for r in results)
+    total_review = sum(len(r["review_tags"]) for r in results)
+    tracks_with_confident = [r for r in results if r["confident_tags"]]
+    tracks_with_review = [r for r in results if r["review_tags"]]
 
     console.print(f"[bold]Summary:[/bold]")
     console.print(f"  Processed: {len(results)} tracks")
-    console.print(f"  Tracks with new suggestions: {len(tracks_with_suggestions)}")
-    console.print(f"  Total new tags to add: {total_new}")
+    if two_tier:
+        console.print(f"  [green]AUTO[/green]:   {total_confident} tags on {len(tracks_with_confident)} tracks (above {auto_threshold:.0%})")
+        console.print(f"  [yellow]REVIEW[/yellow]: {total_review} tags on {len(tracks_with_review)} tracks ({review_threshold:.0%}–{auto_threshold:.0%})")
+    else:
+        console.print(f"  New tags: {total_confident} on {len(tracks_with_confident)} tracks (above {auto_threshold:.0%})")
 
     # Save JSON output
     if args.output:
@@ -369,33 +423,60 @@ def main():
             json.dump(results, f, indent=2)
         console.print(f"  Predictions saved to {args.output}")
 
-    # Apply tags
-    if args.apply and total_new > 0:
-        console.print()
-        if not Confirm.ask(f"Write {total_new} new tags to {len(tracks_with_suggestions)} files?"):
-            console.print("[yellow]Aborted.[/yellow]")
-            return
+    if not args.apply:
+        if total_confident + total_review > 0:
+            console.print(
+                "\n[yellow]Dry run — use --apply to write tags to files.[/yellow]"
+            )
+        return
 
-        written = 0
-        for result in tracks_with_suggestions:
+    # Apply tags
+    written = 0
+
+    # 1. Auto-apply confident tags
+    if total_confident > 0:
+        console.print(f"\n[green bold]Writing {total_confident} confident tags...[/green bold]")
+        for result in tracks_with_confident:
             filepath = Path(result["file"])
             try:
-                write_tags(filepath, result["new_tags"], merge=not args.replace,
+                write_tags(filepath, result["confident_tags"], merge=not args.replace,
                            valid_tags=valid_tags, retired=retired)
                 written += 1
                 console.print(
                     f"  [green]✓[/green] {result['filename']}: "
-                    f"+{', '.join(result['new_tags'])}"
+                    f"+{', '.join(result['confident_tags'])}"
                 )
             except Exception as e:
                 console.print(f"  [red]✗[/red] {result['filename']}: {e}")
 
-        console.print(f"\n[green]Written tags to {written} files.[/green]")
+    # 2. Review tier — prompt per track
+    if two_tier and total_review > 0:
+        console.print(f"\n[yellow bold]Review {total_review} borderline tags:[/yellow bold]\n")
 
-    elif not args.apply and total_new > 0:
-        console.print(
-            "\n[yellow]Dry run — use --apply to write tags to files.[/yellow]"
-        )
+        for result in tracks_with_review:
+            filepath = Path(result["file"])
+            review_preds = [p for p in result["review"]
+                           if p["tag"] in result["review_tags"]]
+
+            console.print(f"  [cyan]{result['filename']}[/cyan]")
+            for pred in review_preds:
+                console.print(f"    {pred['tag']:25s} {pred['confidence']:.1%}")
+
+            if Confirm.ask(f"    Add these {len(review_preds)} tags?"):
+                try:
+                    write_tags(filepath, result["review_tags"], merge=not args.replace,
+                               valid_tags=valid_tags, retired=retired)
+                    written += 1
+                    console.print(
+                        f"    [green]✓[/green] +{', '.join(result['review_tags'])}"
+                    )
+                except Exception as e:
+                    console.print(f"    [red]✗[/red] {e}")
+            else:
+                console.print(f"    [dim]Skipped[/dim]")
+            console.print()
+
+    console.print(f"\n[green]Written tags to {written} files.[/green]")
 
 
 if __name__ == "__main__":
